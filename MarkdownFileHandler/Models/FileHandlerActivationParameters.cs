@@ -37,13 +37,14 @@ namespace MarkdownFileHandler.Models
 
         internal FileHandlerActivationParameters()
         {
-
+            this.DomainHint = "organizations";
         }
 
         public FileHandlerActivationParameters(NameValueCollection collection)
         {
             sourceParameters = collection;
             this.OtherValues = new Dictionary<string, string>();
+            this.DomainHint = "organizations";
             if (collection != null)
             {
                 foreach(var key in collection.AllKeys)
@@ -59,8 +60,8 @@ namespace MarkdownFileHandler.Models
                         case "userId":
                             this.UserId = collection[key];
                             break;
-                        case "filename":
-                            this.Filename = collection[key];
+                        case "domainHint":
+                            this.DomainHint = collection[key];
                             break;
                         case "items":
                             this.Items = collection[key];
@@ -130,11 +131,14 @@ namespace MarkdownFileHandler.Models
         public string UserId { get; set; }
 
         /// <summary>
+        /// A domain hint parameter than identifies whether the UserId is an organizational account or a personal account.
+        /// </summary>
+        public string DomainHint { get; private set; }
+
+        /// <summary>
         /// The content of a file, used when saving changes back from the client
         /// </summary>
         public string FileContent { get; set; }
-
-        public string Filename { get; set; }
 
         public Dictionary<string, string> OtherValues { get; private set; }
 
@@ -152,6 +156,8 @@ namespace MarkdownFileHandler.Models
             }
 
         }
+
+        
 
         private static List<T> ConvertFromJsonArray<T>(string input)
         {

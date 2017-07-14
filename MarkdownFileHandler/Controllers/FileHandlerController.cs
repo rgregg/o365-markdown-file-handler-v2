@@ -83,7 +83,7 @@ namespace MarkdownFileHandler.Controllers
             MarkdownFileHandler.AsyncJob job = new MarkdownFileHandler.AsyncJob(addToZipFile);
             job.Status.OriginalParameters = input.ToDictionary();
 
-            var accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(input.ResourceId);
+            var accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(new string[] { "Files.ReadWrite.All" }, SettingsHelper.RedirectUri);
 
             HostingEnvironment.QueueBackgroundWorkItem(ct => job.Begin(input.ItemUrls, accessToken));
             return View("AsyncAction", new AsyncActionModel { JobIdentifier = job.Id, Status = job.Status, Title = "Add to ZIP" });
@@ -191,7 +191,8 @@ namespace MarkdownFileHandler.Controllers
             string accessToken = null;
             try
             {
-                accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(input.ResourceId, allowInteractiveLogin);
+                //accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(input.ResourceId, allowInteractiveLogin);
+                accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(new string[] { "Files.ReadWrite.All" }, SettingsHelper.RedirectUri);
             }
             catch (Exception ex)
             {

@@ -32,11 +32,14 @@ namespace MarkdownFileHandler
     using Microsoft.Owin.Security.Cookies;
     using Microsoft.Owin.Security.OpenIdConnect;
     using Owin;
-    using Microsoft.IdentityModel.Clients.ActiveDirectory;
+    using Microsoft.Identity.Client;
     using MarkdownFileHandler.Utils;
     using Models;
     using Controllers;
-
+    using System.Globalization;
+    using System.IdentityModel.Tokens;
+    using System.IdentityModel.Claims;
+    
     public partial class Startup
     {
        
@@ -46,80 +49,87 @@ namespace MarkdownFileHandler
 
             app.UseCookieAuthentication(new CookieAuthenticationOptions { });
 
+            var clientId = SettingsHelper.ClientId;
+            var appKey = SettingsHelper.AppKey;
+            var aadInstance = SettingsHelper.Authority;
+            string redirectUri = SettingsHelper.RedirectUri;
+            var scopes = new string[] { "User.Read", "Files.ReadWrite.All" };
+
+            //app.UseOAuth2CodeRedeemer(
+            //    new OAuth2CodeRedeemerOptions
+            //    {
+            //        ClientId = clientId,
+            //        ClientSecret = appKey,
+            //        RedirectUri = redirectUri
+            //    });
+
             app.UseOpenIdConnectAuthentication(
                 new OpenIdConnectAuthenticationOptions
                 {
+                    // The `Authority` represents the v2.0 endpoint - https://login.microsoftonline.com/common/v2.0
+                    // The `Scope` describes the initial permissions that your app will need.  See https://azure.microsoft.com/documentation/articles/active-directory-v2-scopes/                    
                     ClientId = SettingsHelper.ClientId,
-                    Authority = SettingsHelper.Authority,
-                    ClientSecret = SettingsHelper.AppKey,
-                    ResponseType = "code id_token",
-                    Resource = "https://graph.microsoft.com",
+                    Authority = String.Format(CultureInfo.InvariantCulture, SettingsHelper.Authority, "common", "/v2.0"),
+                    RedirectUri = redirectUri,
+                    Scope = "openid profile " + string.Join(" ", scopes),
                     PostLogoutRedirectUri = "/",
-                    TokenValidationParameters = new System.IdentityModel.Tokens.TokenValidationParameters
+                    TokenValidationParameters = new TokenValidationParameters
                     {
-                        // instead of using the default validation (validating against a single issuer value, as we do in line of business apps (single tenant apps)), 
-                        // we turn off validation
-                        //
-                        // NOTE:
-                        // * In a multitenant scenario you can never validate against a fixed issuer string, as every tenant will send a different one.
-                        // * If you don’t care about validating tenants, as is the case for apps giving access to 1st party resources, you just turn off validation.
-                        // * If you do care about validating tenants, think of the case in which your app sells access to premium content and you want to limit access only to the tenant that paid a fee, 
-                        //       you still need to turn off the default validation but you do need to add logic that compares the incoming issuer to a list of tenants that paid you, 
-                        //       and block access if that’s not the case.
-                        // * Refer to the following sample for a custom validation logic: https://github.com/AzureADSamples/WebApp-WebAPI-MultiTenant-OpenIdConnect-DotNet
-                        ValidateIssuer = false
+                        ValidateIssuer = false,
+                        // In a real application you would use IssuerValidator for additional checks, like making sure the user's organization has signed up for your app.
+                        //     IssuerValidator = (issuer, token, tvp) =>
+                        //     {
+                        //        //if(MyCustomTenantValidation(issuer)) 
+                        //        return issuer;
+                        //        //else
+                        //        //    throw new SecurityTokenInvalidIssuerException("Invalid issuer");
+                        //    },
                     },
-                    Notifications = new OpenIdConnectAuthenticationNotifications()
+                    Notifications = new OpenIdConnectAuthenticationNotifications
                     {
-                        SecurityTokenValidated = (context) =>
-                        {
-                            // If your authentication logic is based on users then add your logic here
-                            return Task.FromResult(0);
-                        },
-                        AuthenticationFailed = (context) =>
-                        {
-                            // Pass in the context back to the app
-                            string message = Uri.EscapeDataString(context.Exception.Message);
-                            context.OwinContext.Response.Redirect("/Home/Error?msg=" + message);
-                            context.HandleResponse(); // Suppress the exception
-                            return Task.FromResult(0);
-                        },
+                        // If there is a code in the OpenID Connect response, redeem it for an access token and refresh token, and store those away.
                         AuthorizationCodeReceived = async (context) =>
                         {
                             var code = context.Code;
-                            ClientCredential credential = new ClientCredential(SettingsHelper.ClientId, SettingsHelper.AppKey);
+                            string signedInUserID = context.AuthenticationTicket.Identity.FindFirst(ClaimTypes.NameIdentifier).Value;
+                            TokenCache userTokenCache = new MSALPersistentTokenCache(signedInUserID).GetMsalCacheInstance();
+                            ConfidentialClientApplication cca =
+                                new ConfidentialClientApplication(clientId, redirectUri, new ClientCredential(appKey), userTokenCache, null);
+                            try
+                            {
+                                AuthenticationResult result = await cca.AcquireTokenByAuthorizationCodeAsync(code, scopes);
+                            }
+                            catch (Exception eee)
+                            {
 
-                            string tenantID = context.AuthenticationTicket.Identity.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid").Value;
-                            string signInUserId = context.AuthenticationTicket.Identity.FindFirst(AuthHelper.ObjectIdentifierClaim).Value;
-
-                            var authContext = new Microsoft.IdentityModel.Clients.ActiveDirectory.AuthenticationContext(SettingsHelper.Authority, 
-                                new AzureTableTokenCache(signInUserId));
-
-                            // Get the access token for AAD Graph. Doing this will also initialize the token cache associated with the authentication context
-                            // In theory, you could acquire token for any service your application has access to here so that you can initialize the token cache
-                            AuthenticationResult result = await authContext.AcquireTokenByAuthorizationCodeAsync(code,
-                                new Uri(HttpContext.Current.Request.Url.GetLeftPart(UriPartial.Path)),
-                                credential,
-                                SettingsHelper.AADGraphResourceId);
+                            }
+                        },
+                        AuthenticationFailed = (notification) =>
+                        {
+                            notification.HandleResponse();
+                            notification.Response.Redirect("/Error?message=" + notification.Exception.Message);
+                            return Task.FromResult(0);
                         },
                         RedirectToIdentityProvider = (context) =>
                         {
                             // This ensures that the address used for sign in and sign out is picked up dynamically from the request
                             // this allows you to deploy your app (to Azure Web Sites, for example)without having to change settings
                             // Remember that the base URL of the address used here must be provisioned in Azure AD beforehand.
-                            string appBaseUrl = context.Request.Scheme + "://" + context.Request.Host + context.Request.PathBase;
-                            context.ProtocolMessage.RedirectUri = appBaseUrl + "/";
-                            context.ProtocolMessage.PostLogoutRedirectUri = appBaseUrl;
+                            context.ProtocolMessage.RedirectUri = SettingsHelper.RedirectUri;
+                            context.ProtocolMessage.PostLogoutRedirectUri = SettingsHelper.RedirectUri;
 
                             FileHandlerActivationParameters fileHandlerActivation;
                             if (FileHandlerController.IsFileHandlerActivationRequest(new HttpRequestWrapper(HttpContext.Current.Request), out fileHandlerActivation))
                             {
                                 // Add LoginHint and DomainHint if the request includes a form handler post
                                 context.ProtocolMessage.LoginHint = fileHandlerActivation.UserId;
-                                context.ProtocolMessage.DomainHint = "organizations";
+                                context.ProtocolMessage.DomainHint = fileHandlerActivation.DomainHint;
 
                                 // Save the form in the cookie to prevent it from getting lost in the login redirect
-                                CookieStorage.Save(HttpContext.Current.Request.Form, HttpContext.Current.Response);
+                                if (HttpContext.Current.Request.Form.Count > 0)
+                                {
+                                    CookieStorage.Save(HttpContext.Current.Request.Form, HttpContext.Current.Response);
+                                }
                             }
 
                             // Allow us to change the prompt in consent mode if the challenge properties specify a prompt type
@@ -132,7 +142,8 @@ namespace MarkdownFileHandler
                             return Task.FromResult(0);
                         }
                     }
-                });
+                }
+            );
         }
     }
 }

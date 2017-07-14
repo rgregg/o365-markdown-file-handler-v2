@@ -3,7 +3,8 @@
     <text>
     <ul class="nav navbar-nav navbar-right">
         <li class="navbar-text">
-            Hello, @User.Identity.Name!
+
+            Hello, @(((System.Security.Claims.ClaimsIdentity)User.Identity).FindFirst("name").Value)!
         </li>
         <li>
             @Html.ActionLink("Sign out", "SignOut", "Account")

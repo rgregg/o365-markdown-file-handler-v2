@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using System.Web;
 using System.Web.Http;
 
 namespace MarkdownFileHandler.Controllers
@@ -29,7 +30,7 @@ namespace MarkdownFileHandler.Controllers
             string accessToken = null;
             try
             {
-                accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(resourceId);
+                accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(new string[] { "Files.ReadWrite.All" }, SettingsHelper.RedirectUri);
             }
             catch (Exception ex)
             {
@@ -64,7 +65,7 @@ namespace MarkdownFileHandler.Controllers
             string accessToken = null;
             try
             {
-                accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(resourceId);
+                accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(new string[] { "Files.ReadWrite.All" }, SettingsHelper.RedirectUri);
             }
             catch (Exception ex)
             {
@@ -100,7 +101,7 @@ namespace MarkdownFileHandler.Controllers
             string accessToken = null;
             try
             {
-                accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(resourceId);
+                accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(new string[] { "Files.ReadWrite.All" }, SettingsHelper.RedirectUri);
             }
             catch (Exception ex)
             {

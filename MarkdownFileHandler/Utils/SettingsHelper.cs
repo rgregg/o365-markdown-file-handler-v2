@@ -32,6 +32,7 @@ namespace MarkdownFileHandler
     {
         private static string _clientId = ConfigurationManager.AppSettings["ida:ClientId"];
         private static string _appKey = ConfigurationManager.AppSettings["ida:ClientSecret"] ?? ConfigurationManager.AppSettings["ida:AppKey"];
+        private static string _redirectUri = ConfigurationManager.AppSettings["ida:RedirectUri"];
 
         private static string _graphResourceId = ConfigurationManager.AppSettings["ida:GraphResourceId"];
         private static string _authority = ConfigurationManager.AppSettings["ida:AADInstance"];
@@ -68,6 +69,14 @@ namespace MarkdownFileHandler
             get
             {
                 return _graphResourceId;
+            }
+        }
+
+        public static string RedirectUri
+        {
+            get
+            {
+                return _redirectUri;
             }
         }
     }

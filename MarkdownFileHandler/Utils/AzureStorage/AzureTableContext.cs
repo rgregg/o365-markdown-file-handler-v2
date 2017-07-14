@@ -23,7 +23,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-namespace MarkdownFileHandler.Utils
+ namespace MarkdownFileHandler.Utils
 {
     using System;
     using Microsoft.Azure;
@@ -45,16 +45,16 @@ namespace MarkdownFileHandler.Utils
         public AzureTableContext()
         {
             client = this.StorageAccount.CreateCloudTableClient();
-            UserTokenCacheTable = client.GetTableReference("tokenCache");
+            UserTokenCacheTable = client.GetTableReference("msalTokenCache");
             UserTokenCacheTable.CreateIfNotExists();
         }
     }
 
 
-    public class TokenCacheEntity : TableEntity
+    public class AzureTokenCacheEntity : TableEntity
     {
-        public const string PartitionKeyValue = "tokenCache";
-        public TokenCacheEntity()
+        public const string PartitionKeyValue = "msalTokenCache";
+        public AzureTokenCacheEntity()
         {
             this.PartitionKey = PartitionKeyValue;
         }

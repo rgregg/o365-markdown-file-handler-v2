@@ -26,56 +26,46 @@
 namespace MarkdownFileHandler
 {
     using System.Threading.Tasks;
-    using Microsoft.IdentityModel.Clients.ActiveDirectory;
+    using System.Linq;
+    using Microsoft.Identity.Client;
     using Utils;
+    using System;
+    using System.Security.Claims;
+    using System.Web;
 
     public static class AuthHelper
     {
         public const string ObjectIdentifierClaim = "http://schemas.microsoft.com/identity/claims/objectidentifier";
-        private static ClientCredential clientCredential = new ClientCredential(SettingsHelper.ClientId, SettingsHelper.AppKey);
         private const string AuthContextCacheKey = "authContext";
+
+        internal static Task GetUserAccessTokenSilentAsync(string[] v, HttpContextBase httpContext, object redirectUri)
+        {
+            throw new NotImplementedException();
+        }
 
         /// <summary>
         /// Silently retrieve a new access token for the specified resource. If the request fails, null is returned.
         /// </summary>
         /// <param name="resource"></param>
         /// <returns></returns>
-        public static async Task<string> GetUserAccessTokenSilentAsync(string resource, object cachedContext = null)
+        public static async Task<string> GetUserAccessTokenSilentAsync(string[] scopes, string redirectUri, MSALPersistentTokenCache cachedContext = null)
         {
-            string signInUserId = GetUserId();
-            if (!string.IsNullOrEmpty(signInUserId))
+            // try to get token silently
+            string signedInUserID = ClaimsPrincipal.Current.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            TokenCache userTokenCache = cachedContext?.GetMsalCacheInstance() ?? new MSALPersistentTokenCache(signedInUserID).GetMsalCacheInstance();
+            ConfidentialClientApplication cca = new ConfidentialClientApplication(SettingsHelper.ClientId, redirectUri, new ClientCredential(SettingsHelper.AppKey), userTokenCache, null);
+            if (cca.Users.Count() > 0)
             {
-                AuthenticationContext authContext = null;
-
-                // Cache the authentication context in the session, so we don't have to reconstruct the cache for every call
-                var session = System.Web.HttpContext.Current?.Session;
-                if (session != null)
-                {
-                    authContext = session[AuthContextCacheKey] as AuthenticationContext;
-                }
-
-                if (authContext == null)
-                {
-                    authContext = new AuthenticationContext(SettingsHelper.Authority, false, new AzureTableTokenCache(signInUserId));
-
-                    // Store the newly created authContext into the session cache
-                    if (session != null)
-                    {
-                        session[AuthContextCacheKey] = authContext;
-                    }
-                }
-
                 try
                 {
-                    var userCredential = new UserIdentifier(signInUserId, UserIdentifierType.UniqueId);
-                    var authResult = await authContext.AcquireTokenSilentAsync(resource, clientCredential, userCredential);
-                    return authResult.AccessToken;
+                    AuthenticationResult result = await cca.AcquireTokenSilentAsync(scopes, cca.Users.First());
+                    return result.AccessToken;
                 }
-                catch (AdalSilentTokenAcquisitionException)
+                catch (MsalUiRequiredException)
                 {
-                    // We don't really care about why we couldn't get a token silently, since the resolution will always be the same
                 }
             }
+            
             return null;
         }
 
@@ -85,12 +75,8 @@ namespace MarkdownFileHandler
         /// <returns></returns>
         public static string GetUserId()
         {
-            var claim = System.Security.Claims.ClaimsPrincipal.Current.FindFirst(ObjectIdentifierClaim);
-            if (null != claim)
-            {
-                return claim.Value;
-            }
-            return null;
+            string signedInUserID = ClaimsPrincipal.Current.FindFirst(ObjectIdentifierClaim)?.Value;
+            return signedInUserID;
         }
     }
 }

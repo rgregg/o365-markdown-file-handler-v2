@@ -39,13 +39,14 @@ namespace MarkdownFileHandler.Controllers
             {
                 try
                 {
-                    var accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(SettingsHelper.AADGraphResourceId);
+                    var accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(new string[] { "User.Read" }, SettingsHelper.RedirectUri);
 
                     if (accessToken == null)
                     {
                         // Redirect to get new tokens
-                        return Redirect("/Account/SignIn?force=1");
+                      return Redirect("/Account/SignIn?force=1");
                     }
+
                     // Make an API request to get display name and MySite URL
                     var response = await MarkdownFileHandler.Directory.UserInfo.GetUserInfoAsync(SettingsHelper.AADGraphResourceId, model.SignInName, accessToken);
                     if (null != response)

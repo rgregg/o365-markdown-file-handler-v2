@@ -23,114 +23,136 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+
+
+
 namespace MarkdownFileHandler.Utils
 {
     using System;
-    using Microsoft.IdentityModel.Clients.ActiveDirectory;
+    using Microsoft.Identity.Client;
     using Microsoft.WindowsAzure.Storage.Table;
+    using System.Threading;
 
-    public class AzureTableTokenCache : TokenCache
+    public class MSALPersistentTokenCache
     {
-        public string User { get; set; }
+        private static ReaderWriterLockSlim SessionLock = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion);
 
+        /// <summary>
+        /// Unique identifier for the user this persistent token cache is assocaited with
+        /// </summary>
+        public string UserId { get; set; }
+
+        /// <summary>
+        /// Context for our Azure table operations
+        /// </summary>
         private AzureTableContext tables = new AzureTableContext();
-        TokenCacheEntity CachedEntity;
 
-        public AzureTableTokenCache(string user)
+        /// <summary>
+        /// Cached instance of the real TokenCache object
+        /// </summary>
+        TokenCache cache = new TokenCache();
+
+        /// <summary>
+        /// Cached instance of our Azure table persisted object
+        /// </summary>
+        AzureTokenCacheEntity persistedCacheEntity = null;
+
+        public MSALPersistentTokenCache(string userId)
         {
-            this.User = user;
-            this.AfterAccess = AfterAccessNotification;
-            this.BeforeAccess = BeforeAccessNotification;
-            this.BeforeWrite = BeforeWriteNotification;
+            this.UserId = userId;
 
-            CachedEntity = LoadPersistedCacheEntry();
-            this.Deserialize((CachedEntity == null) ? null : CachedEntity.CacheBits);
+            this.Load();
         }
 
-        public override void Clear()
+        public TokenCache GetMsalCacheInstance()
         {
-            base.Clear();
+            cache.SetBeforeAccess(BeforeAccessNotification);
+            cache.SetAfterAccess(AfterAccessNotification);
+            Load();
+            return cache;
+        }
 
-            var entry = LoadPersistedCacheEntry();
-            if (null != entry)
+        public void Load()
+        {
+            SessionLock.EnterReadLock();
+
+            var cacheData = ReadPersistedEntry();
+            cache.Deserialize(cacheData?.CacheBits);
+
+            SessionLock.ExitReadLock();
+        }
+
+        /// <summary>
+        /// Reads the persisted token cache entity from Azure table storage
+        /// </summary>
+        /// <returns></returns>
+        private AzureTokenCacheEntity ReadPersistedEntry()
+        {
+            try
             {
-                TableOperation delete = TableOperation.Delete(entry);
-                tables.UserTokenCacheTable.Execute(delete);
+                TableOperation retrieve = TableOperation.Retrieve<AzureTokenCacheEntity>(AzureTokenCacheEntity.PartitionKeyValue, UserId);
+                TableResult results = tables.UserTokenCacheTable.Execute(retrieve);
+
+                var persistedEntry = (AzureTokenCacheEntity)results.Result;
+                return persistedEntry;
             }
-            CachedEntity = null;
-        }
-
-        private TokenCacheEntity LoadPersistedCacheEntry()
-        {
-            System.Diagnostics.Debug.WriteLine($"LoadPersistedCacheEntry for {User}");
-
-            TableOperation retrieve = TableOperation.Retrieve<TokenCacheEntity>(TokenCacheEntity.PartitionKeyValue, User);
-            TableResult results = tables.UserTokenCacheTable.Execute(retrieve);
-            var persistedEntry = (TokenCacheEntity)results.Result;
-            return persistedEntry;
-        }
-
-        private void BeforeAccessNotification(TokenCacheNotificationArgs args)
-        {
-            System.Diagnostics.Debug.WriteLine($"BeforeAccessNotification for {User}");
-
-            // Look up the persisted entry
-            var persistedEntry = LoadPersistedCacheEntry();
-
-            if (CachedEntity == null)
+            catch (Exception ex)
             {
-                // first time access
-                CachedEntity = persistedEntry;
-                System.Diagnostics.Debug.WriteLine($"BeforeAccessNotification for {User} - first time access");
-            }
-            else {
-                // if the in-memory copy is older than the persistent copy
-                if (persistedEntry != null && persistedEntry.LastWrite > CachedEntity.LastWrite)
-                {
-                //// read from from storage, update in-memory copy
-                CachedEntity = persistedEntry;
-                    System.Diagnostics.Debug.WriteLine($"BeforeAccessNotification for {User} - update in-memory cache");
-                }
-            }
-
-            if (null != CachedEntity)
-            {
-                System.Diagnostics.Debug.WriteLine($"BeforeAccessNotification for {User} - Deserialize cached entity");
-                this.Deserialize(CachedEntity.CacheBits);
-            }
-            else
-            {
-                System.Diagnostics.Debug.WriteLine($"BeforeAccessNotification for {User} - No cached entry exists");
-                this.Deserialize(null);
+                System.Diagnostics.Debug.WriteLine($"ReadPersistedEntry: Exception reading from Azure table storage: {ex.Message}.");
+                return null;
             }
         }
 
-        private void AfterAccessNotification(TokenCacheNotificationArgs args)
+        /// <summary>
+        /// Writes the cacheBits data back to the Azure table store
+        /// </summary>
+        /// <param name="cacheBits"></param>
+        /// <param name="entity"></param>
+        private AzureTokenCacheEntity WritePersistedEntry(byte[] cacheBits, AzureTokenCacheEntity entity)
         {
-            System.Diagnostics.Debug.WriteLine($"AfterAccessNotification for {User}");
-
-            if (this.HasStateChanged)
+            if (entity == null)
             {
-                if (CachedEntity == null)
-                {
-                    CachedEntity = new TokenCacheEntity();
-                }
-                CachedEntity.RowKey = User;
-                CachedEntity.CacheBits = this.Serialize();
-                CachedEntity.LastWrite = DateTime.Now;
+                entity = new AzureTokenCacheEntity();
+                entity.RowKey = this.UserId;
+            }
+            
+            entity.CacheBits = cacheBits;
+            entity.LastWrite = DateTime.Now;
 
-                TableOperation insert = TableOperation.InsertOrReplace(CachedEntity);
-                tables.UserTokenCacheTable.Execute(insert);
-                this.HasStateChanged = false;
+            TableOperation insert = TableOperation.InsertOrReplace(entity);
+            tables.UserTokenCacheTable.Execute(insert);
 
-                System.Diagnostics.Debug.WriteLine($"Wrote value to persistent cache for {User}");
+            return entity;
+        }
+
+        public void Persist()
+        {
+            SessionLock.EnterWriteLock();
+
+            // Optimistically set HasStateChanged to false. We need to do it early to avoid losing changes made by a concurrent thread.
+            cache.HasStateChanged = false;
+
+            // Reflect changes in the persistent store
+            this.persistedCacheEntity = WritePersistedEntry(cache.Serialize(), this.persistedCacheEntity);
+
+            SessionLock.ExitWriteLock();
+        }
+
+        // Triggered right before MSAL needs to access the cache.
+        // Reload the cache from the persistent store in case it changed since the last access.
+        void BeforeAccessNotification(TokenCacheNotificationArgs args)
+        {
+            Load();
+        }
+
+        // Triggered right after MSAL accessed the cache.
+        void AfterAccessNotification(TokenCacheNotificationArgs args)
+        {
+            // if the access operation resulted in a cache update
+            if (cache.HasStateChanged)
+            {
+                Persist();
             }
         }
-
-        private void BeforeWriteNotification(TokenCacheNotificationArgs args)
-        {
-            System.Diagnostics.Debug.WriteLine($"BeforeWriteNotification for {User}");
-        }
-
     }
 }
