@@ -44,7 +44,7 @@ namespace MarkdownFileHandler.Models
         public bool ReadOnly { get; set; }
 
         public string Filename { get; set; }
-
+        public string AccessToken { get; internal set; }
 
         public static MarkdownFileModel GetErrorModel(FileHandlerActivationParameters parameters, string errorMessage)
         {
@@ -74,7 +74,7 @@ namespace MarkdownFileHandler.Models
                 MarkdownFileContent = markdownContent,
                 HtmlFileContent = ConvertMarkdowntoHtml(markdownContent),
                 Filename = filename,
-                ReadOnly = false
+                ReadOnly = false,
             };
         }
 

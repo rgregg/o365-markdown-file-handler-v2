@@ -30,6 +30,7 @@
         @Html.Hidden("itemUrl", Model.ActivationParameters.ItemUrls.First());
         @Html.Hidden("filename", Model.Filename);
         @Html.TextArea("content", Model.MarkdownFileContent);
+        @Html.Hidden("accessToken", Model.AccessToken);
     }
 }
 <script>

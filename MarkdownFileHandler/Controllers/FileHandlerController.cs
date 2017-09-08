@@ -86,6 +86,7 @@ namespace MarkdownFileHandler.Controllers
             var accessToken = await AuthHelper.GetUserAccessTokenSilentAsync(input.ResourceId);
 
             HostingEnvironment.QueueBackgroundWorkItem(ct => job.Begin(input.ItemUrls, accessToken));
+            
             return View("AsyncAction", new AsyncActionModel { JobIdentifier = job.Id, Status = job.Status, Title = "Add to ZIP" });
         }
 
@@ -212,7 +213,11 @@ namespace MarkdownFileHandler.Controllers
                 return MarkdownFileModel.GetErrorModel(input, ex);
             }
 
-            return MarkdownFileModel.GetWriteableModel(input, results.Filename, results.Content);
+            var output = MarkdownFileModel.GetWriteableModel(input, results.Filename, results.Content);
+
+            // Don't do this.. For debugging only.
+            output.AccessToken = accessToken;
+            return output;
         }
     }
 }
