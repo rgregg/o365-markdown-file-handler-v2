@@ -89,7 +89,7 @@ namespace MarkdownFileHandler.Models
         /// <summary>
         /// Resource ID for authentication purposes
         /// </summary>
-        public string ResourceId { get { return "https://graph.microsoft.com"; } }
+        public string ResourceId { get { return SettingsHelper.AADGraphResourceId; } }
 
         /// <summary>
         /// Locale for the current user's language
